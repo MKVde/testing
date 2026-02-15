@@ -107,20 +107,20 @@ async function runTest() {
     });
     console.log(`📸 Screenshot 2/4 - Contact section`);
 
-    // Wait for form - use name field as marker
-    console.log(`⏳ Instance ${instanceNum}: Waiting for form...`);
+    // Wait for form
+    console.log(`⏳ Instance ${instanceNum}: Waiting for form elements...`);
     await page.waitForSelector('input[name="name"]', { 
       state: 'visible', 
       timeout: 15000 
     });
     
-    // Wait for intl-tel-input library to load
+    // Wait for intl-tel-input library
     console.log(`⏳ Instance ${instanceNum}: Waiting for phone library...`);
     await page.waitForFunction(() => {
       return window.intlTelInput !== undefined;
     }, { timeout: 10000 });
     
-    await page.waitForTimeout(2000); // Extra wait for library initialization
+    await page.waitForTimeout(2000);
     console.log(`✅ Instance ${instanceNum}: Form ready`);
 
     // Generate demo data
@@ -143,15 +143,19 @@ async function runTest() {
     console.log(`   ✓ Email filled`);
     await page.waitForTimeout(500);
 
-    // Fill phone - use ID selector and wait for visibility
+    // Fill phone
     console.log(`   ⏳ Filling phone field...`);
     await page.waitForSelector('#phone', { state: 'visible', timeout: 10000 });
     await page.fill('#phone', demoData.phone);
     console.log(`   ✓ Phone filled`);
     await page.waitForTimeout(500);
 
-    // Select service
-    await page.selectOption('select[name="servicetype"]', demoData.servicetype);
+    // Select service - wait for it to be visible and interactable
+    console.log(`   ⏳ Selecting service type...`);
+    await page.waitForSelector('#servicetype', { state: 'visible', timeout: 10000 });
+    
+    // Use ID selector instead
+    await page.selectOption('#servicetype', demoData.servicetype);
     console.log(`   ✓ Service selected: ${demoData.servicetype}`);
     await page.waitForTimeout(500);
 
@@ -167,7 +171,7 @@ async function runTest() {
     console.log(`📸 Screenshot 3/4 - Form filled`);
 
     // Submit
-    console.log(`\n⏳ Instance ${instanceNum}: Submitting...`);
+    console.log(`\n⏳ Instance ${instanceNum}: Submitting form...`);
     
     try {
       const [response] = await Promise.all([
@@ -179,58 +183,64 @@ async function runTest() {
       ]);
 
       const status = response.status();
-      console.log(`✅ Instance ${instanceNum}: Submitted! Status: ${status}`);
+      console.log(`✅ Instance ${instanceNum}: Form submitted! HTTP Status: ${status}`);
       
       try {
         const responseBody = await response.text();
-        console.log(`📄 Server Response:`);
-        console.log(responseBody.substring(0, 300));
+        console.log(`\n📄 Server Response:`);
+        console.log(responseBody.substring(0, 400));
+        console.log(`\n`);
         
         try {
           const jsonResponse = JSON.parse(responseBody);
-          console.log(`📊 Parsed:`, JSON.stringify(jsonResponse, null, 2));
+          console.log(`📊 Parsed Response:`, JSON.stringify(jsonResponse, null, 2));
           
           if (jsonResponse.success) {
-            console.log(`✅ Success: ${jsonResponse.message}`);
-            console.log(`📧 Email should be sent to: ${demoData.email}`);
+            console.log(`\n✅ SUCCESS: ${jsonResponse.message}`);
+            console.log(`📧 Email sent to: ${demoData.email}`);
+            console.log(`🎫 Request ID: ${jsonResponse.request_id || 'N/A'}`);
           } else {
-            console.log(`⚠️  Error: ${jsonResponse.message}`);
+            console.log(`\n⚠️  ERROR: ${jsonResponse.message}`);
           }
-        } catch (e) {}
+        } catch (e) {
+          console.log(`⚠️  Response is not JSON format`);
+        }
       } catch (e) {
-        console.log(`⚠️  Could not read response`);
+        console.log(`⚠️  Could not read response body`);
       }
 
     } catch (submitError) {
-      console.error(`❌ Instance ${instanceNum}: Submit error:`, submitError.message);
+      console.error(`❌ Instance ${instanceNum}: Form submission error:`, submitError.message);
     }
 
     await page.waitForTimeout(3000);
     
     const successVisible = await page.isVisible('#contact-success-msg').catch(() => false);
-    console.log(`${successVisible ? '✅' : '⚠️'}  Success message: ${successVisible}`);
+    console.log(`\n${successVisible ? '✅' : '⚠️'}  Success message visible: ${successVisible}`);
 
     await page.screenshot({ 
       path: path.join(screenshotsDir, `04-after-submit.png`),
       fullPage: true 
     });
-    console.log(`📸 Screenshot 4/4 - After submit`);
+    console.log(`📸 Screenshot 4/4 - After submission`);
 
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`✅ Instance ${instanceNum}: COMPLETED`);
+    console.log(`✅ Instance ${instanceNum}: TEST COMPLETED SUCCESSFULLY`);
     console.log(`${'='.repeat(60)}`);
     console.log(`📊 Summary:`);
-    console.log(`   - Load Time: ${(loadTime / 1000).toFixed(2)}s`);
+    console.log(`   - Page Load Time: ${(loadTime / 1000).toFixed(2)}s`);
     console.log(`   - Form Submitted: ${successVisible ? 'Yes' : 'Check logs'}`);
     console.log(`   - Email Target: ${demoData.email}`);
+    console.log(`   - Screenshots: 4 saved`);
     console.log(`${'='.repeat(60)}\n`);
 
   } catch (error) {
     console.error(`\n${'='.repeat(60)}`);
-    console.error(`❌ Instance ${instanceNum}: ERROR`);
+    console.error(`❌ Instance ${instanceNum}: ERROR OCCURRED`);
     console.error(`${'='.repeat(60)}`);
-    console.error(`Error: ${error.message}`);
-    console.error(`Stack:\n${error.stack}`);
+    console.error(`Error Type: ${error.name}`);
+    console.error(`Error Message: ${error.message}`);
+    console.error(`Stack Trace:\n${error.stack}`);
     console.error(`${'='.repeat(60)}\n`);
     
     try {
@@ -240,8 +250,11 @@ async function runTest() {
           path: path.join(screenshotsDir, `ERROR.png`),
           fullPage: true 
         });
+        console.log(`📸 Instance ${instanceNum}: Error screenshot saved`);
       }
-    } catch (e) {}
+    } catch (screenshotError) {
+      console.error(`⚠️  Instance ${instanceNum}: Could not capture error screenshot`);
+    }
     
     process.exit(1);
   } finally {
