@@ -1,0 +1,81 @@
+name: Google Search Traffic Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      instances:
+        description: 'Number of Google search simulations (1-100)'
+        required: true
+        default: '100'
+        type: choice
+        options:
+          - '1'
+          - '5'
+          - '10'
+          - '20'
+          - '30'
+          - '50'
+          - '75'
+          - '100'
+
+jobs:
+  form-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100]
+      max-parallel: 100
+      fail-fast: false
+    
+    steps:
+      - name: Check if should run
+        id: check
+        run: |
+          if [ ${{ matrix.instance }} -le ${{ github.event.inputs.instances }} ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout code
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        if: steps.check.outputs.should_run == 'true'
+        run: npm install
+
+      - name: Install Playwright Browsers
+        if: steps.check.outputs.should_run == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Setup Virtual Display
+        if: steps.check.outputs.should_run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+          sleep 2
+
+      - name: Run Google Search Simulation
+        if: steps.check.outputs.should_run == 'true'
+        run: node test-form-google-search.js
+        env:
+          INSTANCE_NUM: ${{ matrix.instance }}
+          DISPLAY: :99
+        continue-on-error: true
+
+      - name: Upload Screenshots
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-screenshots-instance-${{ matrix.instance }}
+          path: test-results/google-instance-${{ matrix.instance }}/
+          retention-days: 7
