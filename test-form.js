@@ -9,16 +9,18 @@ function generateDemoData(instanceNum) {
   const randomService = services[Math.floor(Math.random() * services.length)];
   
   return {
-    name: `Test User ${instanceNum}`,
-    email: `test${instanceNum}.${timestamp}@example.com`,
+    name: `Load Test User ${instanceNum}`,
+    email: `test@freightcore.ae`,  // ✅ Real email - you'll receive all test emails here
     phone: `+971501234${String(instanceNum).padStart(3, '0')}`,
-    service_type: randomService,
-    message: `🤖 Automated Load Test\n\n` +
-             `Instance: ${instanceNum}\n` +
+    servicetype: randomService,  // ✅ Fixed field name (no underscore)
+    message: `🤖 AUTOMATED LOAD TEST - GITHUB ACTIONS\n\n` +
+             `Test Instance: #${instanceNum}\n` +
              `Timestamp: ${new Date().toISOString()}\n` +
-             `Service: ${randomService}\n` +
-             `Browser: Chromium with GUI on Xvfb\n` +
-             `\nThis is a test submission from GitHub Actions.`
+             `Service Requested: ${randomService}\n` +
+             `Browser: Chromium (GUI Mode)\n` +
+             `Platform: GitHub Actions Ubuntu Runner\n` +
+             `\n⚠️ This is an automated test submission from your load testing workflow.\n` +
+             `No action required - this tests your contact form performance.`
   };
 }
 
@@ -26,7 +28,7 @@ async function runTest() {
   const instanceNum = process.env.INSTANCE_NUM || '1';
   const targetUrl = process.env.TARGET_URL || 'https://freightcore.ae';
   
-  // Create screenshots directory for this instance
+  // Create screenshots directory
   const screenshotsDir = path.join(__dirname, 'test-results', `instance-${instanceNum}`);
   if (!fs.existsSync(screenshotsDir)) {
     fs.mkdirSync(screenshotsDir, { recursive: true });
@@ -40,9 +42,8 @@ async function runTest() {
   console.log(`🖥️  Display: ${process.env.DISPLAY || 'default'}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  // Launch browser with GUI (runs on Xvfb virtual display)
   const browser = await chromium.launch({
-    headless: false,  // GUI mode (on virtual display)
+    headless: false,  // GUI mode on virtual display
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -61,7 +62,7 @@ async function runTest() {
 
     const page = await context.newPage();
     
-    // Enable console logging from browser
+    // Log browser console messages
     page.on('console', msg => {
       const type = msg.type();
       if (type === 'error' || type === 'warning') {
@@ -69,7 +70,6 @@ async function runTest() {
       }
     });
     
-    // Log page errors
     page.on('pageerror', error => {
       console.error(`❌ Page Error [${instanceNum}]:`, error.message);
     });
@@ -93,7 +93,7 @@ async function runTest() {
       path: path.join(screenshotsDir, `01-homepage.png`),
       fullPage: true 
     });
-    console.log(`📸 Instance ${instanceNum}: Screenshot 1/4 - Homepage captured`);
+    console.log(`📸 Screenshot 1/4 - Homepage captured`);
 
     // ============================================
     // STEP 2: Scroll to Contact Form
@@ -111,7 +111,7 @@ async function runTest() {
       path: path.join(screenshotsDir, `02-contact-section.png`),
       fullPage: true 
     });
-    console.log(`📸 Instance ${instanceNum}: Screenshot 2/4 - Contact section visible`);
+    console.log(`📸 Screenshot 2/4 - Contact section visible`);
 
     // ============================================
     // STEP 3: Wait for Form Elements
@@ -132,8 +132,7 @@ async function runTest() {
     console.log(`   Name: ${demoData.name}`);
     console.log(`   Email: ${demoData.email}`);
     console.log(`   Phone: ${demoData.phone}`);
-    console.log(`   Service: ${demoData.service_type}`);
-    console.log(`   Message: ${demoData.message.substring(0, 50)}...\n`);
+    console.log(`   Service: ${demoData.servicetype}\n`);
 
     console.log(`⏳ Instance ${instanceNum}: Filling form fields...`);
     
@@ -151,7 +150,7 @@ async function runTest() {
     console.log(`   ✓ Email field filled`);
     await page.waitForTimeout(400);
 
-    // Fill phone (using phoneraw field from your HTML)
+    // Fill phone
     await page.click('input[name="phoneraw"]');
     await page.waitForTimeout(300);
     await page.fill('input[name="phoneraw"]', demoData.phone);
@@ -161,8 +160,8 @@ async function runTest() {
     // Select service type
     await page.click('select[name="servicetype"]');
     await page.waitForTimeout(300);
-    await page.selectOption('select[name="servicetype"]', demoData.service_type);
-    console.log(`   ✓ Service type selected: ${demoData.service_type}`);
+    await page.selectOption('select[name="servicetype"]', demoData.servicetype);
+    console.log(`   ✓ Service type selected: ${demoData.servicetype}`);
     await page.waitForTimeout(400);
 
     // Fill message
@@ -177,7 +176,7 @@ async function runTest() {
       path: path.join(screenshotsDir, `03-form-filled.png`),
       fullPage: true 
     });
-    console.log(`📸 Instance ${instanceNum}: Screenshot 3/4 - Form filled`);
+    console.log(`📸 Screenshot 3/4 - Form filled`);
 
     // ============================================
     // STEP 5: Submit Form
@@ -200,7 +199,21 @@ async function runTest() {
       try {
         const responseBody = await response.text();
         console.log(`📄 Instance ${instanceNum}: Server Response:`);
-        console.log(responseBody.substring(0, 200));
+        console.log(responseBody.substring(0, 300));
+        
+        // Try to parse JSON
+        try {
+          const jsonResponse = JSON.parse(responseBody);
+          console.log(`📊 Parsed Response:`, JSON.stringify(jsonResponse, null, 2));
+          
+          if (jsonResponse.success) {
+            console.log(`✅ Server confirmed: ${jsonResponse.message}`);
+          } else {
+            console.log(`⚠️  Server error: ${jsonResponse.message}`);
+          }
+        } catch (e) {
+          // Not JSON or can't parse
+        }
       } catch (e) {
         console.log(`⚠️  Instance ${instanceNum}: Could not read response body`);
       }
@@ -224,7 +237,7 @@ async function runTest() {
       path: path.join(screenshotsDir, `04-after-submit.png`),
       fullPage: true 
     });
-    console.log(`📸 Instance ${instanceNum}: Screenshot 4/4 - After submission`);
+    console.log(`📸 Screenshot 4/4 - After submission`);
 
     // ============================================
     // SUMMARY
@@ -234,8 +247,9 @@ async function runTest() {
     console.log(`${'='.repeat(60)}`);
     console.log(`📊 Summary:`);
     console.log(`   - Page Load Time: ${(loadTime / 1000).toFixed(2)}s`);
-    console.log(`   - Form Submission: ${successVisible ? 'Success' : 'Unknown'}`);
-    console.log(`   - Screenshots: 4 saved to ${screenshotsDir}`);
+    console.log(`   - Form Submission: ${successVisible ? 'Success' : 'Check logs'}`);
+    console.log(`   - Screenshots: 4 saved`);
+    console.log(`   - Email sent to: ${demoData.email}`);
     console.log(`${'='.repeat(60)}\n`);
 
   } catch (error) {
