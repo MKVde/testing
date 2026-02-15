@@ -58,33 +58,41 @@ async function runTest() {
   console.log(`🚀 Instance ${instanceNum}: Starting GUI test`);
   console.log(`🌐 Browser: ${browserType.toUpperCase()}`);
   console.log(`🎯 Target: ${targetUrl}`);
-  console.log(`🖥️  Display: ${process.env.DISPLAY || 'default'}`);
-  console.log(`👁️  Headless: ${headless ? 'Yes' : 'No (GUI Mode)'}`);
   console.log(`${'='.repeat(60)}\n`);
 
   let browser;
+  let playwright;
   
   try {
+    // Import the correct browser
+    if (browserType === 'firefox') {
+      const { firefox } = require('playwright');
+      playwright = firefox;
+      console.log(`📦 Using Firefox browser`);
+    } else {
+      const { chromium } = require('playwright');
+      playwright = chromium;
+      console.log(`📦 Using Chromium-based browser`);
+    }
+
     const launchOptions = {
       headless: headless,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--window-size=1920,1080',
-        '--start-maximized'
+        '--window-size=1920,1080'
       ]
     };
 
     // Configure browser-specific options
-    if (browserType === 'brave') {
-      const executablePath = await getBrowserExecutable('brave');
+    if (browserType === 'chrome' || browserType === 'brave') {
+      const executablePath = await getBrowserExecutable(browserType);
       launchOptions.executablePath = executablePath;
-      console.log(`✅ Using Brave at: ${executablePath}`);
+      console.log(`✅ Using ${browserType} at: ${executablePath}`);
     }
 
-    browser = await chromium.launch(launchOptions);
+    browser = await playwright.launch(launchOptions);
     console.log(`✅ ${browserType.toUpperCase()} browser launched in GUI mode`);
 
     const context = await browser.newContext({

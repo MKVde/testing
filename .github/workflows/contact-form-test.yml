@@ -22,7 +22,7 @@ jobs:
     strategy:
       matrix:
         instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        browser: ['chromium', 'brave']  # Run in BOTH browsers
+        browser: ['chromium', 'chrome']
       max-parallel: ${{ fromJSON(github.event.inputs.instances) }}
       fail-fast: false
     
@@ -60,16 +60,14 @@ jobs:
             libxcb-xfixes0 \
             libasound2 \
             ffmpeg \
-            fluxbox \
-            x11vnc
+            fluxbox
 
-      - name: Install Brave Browser
-        if: matrix.instance <= fromJSON(github.event.inputs.instances) && matrix.browser == 'brave'
+      - name: Install Google Chrome
+        if: matrix.instance <= fromJSON(github.event.inputs.instances) && matrix.browser == 'chrome'
         run: |
-          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
-          sudo apt-get update
-          sudo apt-get install -y brave-browser
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+          google-chrome --version
 
       - name: Install Dependencies
         if: matrix.instance <= fromJSON(github.event.inputs.instances)
@@ -84,32 +82,21 @@ jobs:
       - name: Start Virtual Display
         if: matrix.instance <= fromJSON(github.event.inputs.instances)
         run: |
-          # Start Xvfb (Virtual Display)
           Xvfb :99 -screen 0 1920x1080x24 &
           export DISPLAY=:99
-          
-          # Start window manager
           fluxbox &
-          
-          # Give it time to start
           sleep 3
-          
-          # Verify display is running
-          xdpyinfo -display :99 >/dev/null 2>&1 && echo "✅ Virtual display :99 is running" || echo "❌ Display failed"
-          
-          # Save display number for next steps
+          xdpyinfo -display :99 >/dev/null 2>&1 && echo "✅ Display running" || echo "❌ Display failed"
           echo "DISPLAY=:99" >> $GITHUB_ENV
 
       - name: Start Screen Recording
         if: matrix.instance <= fromJSON(github.event.inputs.instances)
         run: |
           mkdir -p recordings
-          # Record the virtual display to video
           ffmpeg -f x11grab -video_size 1920x1080 -i :99 -codec:v libx264 -r 30 \
             recordings/${{ matrix.browser }}-instance-${{ matrix.instance }}.mp4 &
           echo $! > ffmpeg.pid
           sleep 2
-          echo "✅ Screen recording started"
 
       - name: Run Form Submission Test
         if: matrix.instance <= fromJSON(github.event.inputs.instances)
@@ -129,7 +116,6 @@ jobs:
             kill $(cat ffmpeg.pid) || true
             sleep 2
           fi
-          echo "✅ Screen recording stopped"
 
       - name: Upload Screenshots
         if: matrix.instance <= fromJSON(github.event.inputs.instances) && always()
@@ -155,12 +141,5 @@ jobs:
       - name: Test Summary
         run: |
           echo "### Load Test Completed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Instances: ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Browsers: Chrome & Brave" >> $GITHUB_STEP_SUMMARY
-          echo "- Mode: GUI (with screen recording)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Screenshots available for each browser/instance" >> $GITHUB_STEP_SUMMARY
-          echo "- Video recordings showing GUI interactions" >> $GITHUB_STEP_SUMMARY
+          echo "**Browsers:** Chromium & Google Chrome" >> $GITHUB_STEP_SUMMARY
+          echo "**Instances:** ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
