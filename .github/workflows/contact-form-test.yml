@@ -1,4 +1,4 @@
-name: Contact Form Load Test
+name: Contact Form Load Test - GUI Mode
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       instances:
         description: 'Number of parallel tests (1-10)'
         required: true
-        default: '5'
+        default: '3'
         type: choice
         options:
           - '1'
@@ -22,51 +22,129 @@ jobs:
     strategy:
       matrix:
         instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        browser: ['chromium', 'brave']  # Run in BOTH browsers
       max-parallel: ${{ fromJSON(github.event.inputs.instances) }}
       fail-fast: false
     
     steps:
-      - name: Check if instance should run
-        id: should_run
+      - name: Skip if not needed
+        if: matrix.instance > fromJSON(github.event.inputs.instances)
         run: |
-          if [ ${{ matrix.instance }} -le ${{ github.event.inputs.instances }} ]; then
-            echo "run=true" >> $GITHUB_OUTPUT
-          else
-            echo "run=false" >> $GITHUB_OUTPUT
-          fi
+          echo "Skipping instance ${{ matrix.instance }}"
+          exit 0
 
       - name: Checkout code
-        if: steps.should_run.outputs.run == 'true'
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         uses: actions/checkout@v4
 
       - name: Setup Node.js
-        if: steps.should_run.outputs.run == 'true'
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      - name: Install System Dependencies
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            x11-utils \
+            libxkbcommon-x11-0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-xinerama0 \
+            libxcb-xfixes0 \
+            libasound2 \
+            ffmpeg \
+            fluxbox \
+            x11vnc
+
+      - name: Install Brave Browser
+        if: matrix.instance <= fromJSON(github.event.inputs.instances) && matrix.browser == 'brave'
+        run: |
+          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+          sudo apt-get update
+          sudo apt-get install -y brave-browser
+
       - name: Install Dependencies
-        if: steps.should_run.outputs.run == 'true'
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         run: npm install
 
       - name: Install Playwright Browsers
-        if: steps.should_run.outputs.run == 'true'
-        run: npx playwright install --with-deps chromium
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
+        run: |
+          npx playwright install chromium
+          npx playwright install-deps chromium
+
+      - name: Start Virtual Display
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
+        run: |
+          # Start Xvfb (Virtual Display)
+          Xvfb :99 -screen 0 1920x1080x24 &
+          export DISPLAY=:99
+          
+          # Start window manager
+          fluxbox &
+          
+          # Give it time to start
+          sleep 3
+          
+          # Verify display is running
+          xdpyinfo -display :99 >/dev/null 2>&1 && echo "✅ Virtual display :99 is running" || echo "❌ Display failed"
+          
+          # Save display number for next steps
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+
+      - name: Start Screen Recording
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
+        run: |
+          mkdir -p recordings
+          # Record the virtual display to video
+          ffmpeg -f x11grab -video_size 1920x1080 -i :99 -codec:v libx264 -r 30 \
+            recordings/${{ matrix.browser }}-instance-${{ matrix.instance }}.mp4 &
+          echo $! > ffmpeg.pid
+          sleep 2
+          echo "✅ Screen recording started"
 
       - name: Run Form Submission Test
-        if: steps.should_run.outputs.run == 'true'
+        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         run: node test-form.js
         env:
           INSTANCE_NUM: ${{ matrix.instance }}
+          BROWSER_TYPE: ${{ matrix.browser }}
           TARGET_URL: https://freightcore.ae
+          DISPLAY: :99
+          HEADLESS: 'false'
         continue-on-error: true
 
+      - name: Stop Screen Recording
+        if: matrix.instance <= fromJSON(github.event.inputs.instances) && always()
+        run: |
+          if [ -f ffmpeg.pid ]; then
+            kill $(cat ffmpeg.pid) || true
+            sleep 2
+          fi
+          echo "✅ Screen recording stopped"
+
       - name: Upload Screenshots
-        if: steps.should_run.outputs.run == 'true' && always()
+        if: matrix.instance <= fromJSON(github.event.inputs.instances) && always()
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots-instance-${{ matrix.instance }}
+          name: screenshots-${{ matrix.browser }}-${{ matrix.instance }}
           path: screenshots/
+          retention-days: 7
+
+      - name: Upload Video Recording
+        if: matrix.instance <= fromJSON(github.event.inputs.instances) && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-${{ matrix.browser }}-${{ matrix.instance }}
+          path: recordings/
           retention-days: 7
 
   summary:
@@ -77,5 +155,12 @@ jobs:
       - name: Test Summary
         run: |
           echo "### Load Test Completed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "Instances requested: ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
-          echo "Check artifacts for screenshots" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Instances: ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Browsers: Chrome & Brave" >> $GITHUB_STEP_SUMMARY
+          echo "- Mode: GUI (with screen recording)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Screenshots available for each browser/instance" >> $GITHUB_STEP_SUMMARY
+          echo "- Video recordings showing GUI interactions" >> $GITHUB_STEP_SUMMARY
