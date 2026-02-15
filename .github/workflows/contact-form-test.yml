@@ -25,25 +25,36 @@ jobs:
       max-parallel: ${{ fromJSON(github.event.inputs.instances) }}
       fail-fast: false
     
-    # Only run instances up to the selected number
-    if: ${{ matrix.instance <= fromJSON(github.event.inputs.instances) }}
-    
     steps:
+      - name: Check if instance should run
+        id: should_run
+        run: |
+          if [ ${{ matrix.instance }} -le ${{ github.event.inputs.instances }} ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout code
+        if: steps.should_run.outputs.run == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.should_run.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install Dependencies
+        if: steps.should_run.outputs.run == 'true'
         run: npm install
 
       - name: Install Playwright Browsers
+        if: steps.should_run.outputs.run == 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Run Form Submission Test
+        if: steps.should_run.outputs.run == 'true'
         run: node test-form.js
         env:
           INSTANCE_NUM: ${{ matrix.instance }}
@@ -51,7 +62,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Screenshots
-        if: always()
+        if: steps.should_run.outputs.run == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots-instance-${{ matrix.instance }}
@@ -66,5 +77,5 @@ jobs:
       - name: Test Summary
         run: |
           echo "### Load Test Completed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "Instances run: ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
+          echo "Instances requested: ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
           echo "Check artifacts for screenshots" >> $GITHUB_STEP_SUMMARY
