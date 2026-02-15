@@ -1,0 +1,70 @@
+name: Contact Form Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      instances:
+        description: 'Number of parallel tests (1-10)'
+        required: true
+        default: '5'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '5'
+          - '7'
+          - '10'
+
+jobs:
+  form-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      max-parallel: ${{ fromJSON(github.event.inputs.instances) }}
+      fail-fast: false
+    
+    # Only run instances up to the selected number
+    if: ${{ matrix.instance <= fromJSON(github.event.inputs.instances) }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Form Submission Test
+        run: node test-form.js
+        env:
+          INSTANCE_NUM: ${{ matrix.instance }}
+          TARGET_URL: https://freightcore.ae
+        continue-on-error: true
+
+      - name: Upload Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-instance-${{ matrix.instance }}
+          path: screenshots/
+          retention-days: 7
+
+  summary:
+    needs: form-test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Test Summary
+        run: |
+          echo "### Load Test Completed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "Instances run: ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
+          echo "Check artifacts for screenshots" >> $GITHUB_STEP_SUMMARY
