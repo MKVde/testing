@@ -10,9 +10,9 @@ function generateDemoData(instanceNum) {
   
   return {
     name: `Load Test User ${instanceNum}`,
-    email: `test@freightcore.ae`,  // ✅ Real email - you'll receive all test emails here
+    email: `test@freightcore.ae`,
     phone: `+971501234${String(instanceNum).padStart(3, '0')}`,
-    servicetype: randomService,  // ✅ Fixed field name (no underscore)
+    servicetype: randomService,
     message: `🤖 AUTOMATED LOAD TEST - GITHUB ACTIONS\n\n` +
              `Test Instance: #${instanceNum}\n` +
              `Timestamp: ${new Date().toISOString()}\n` +
@@ -28,7 +28,6 @@ async function runTest() {
   const instanceNum = process.env.INSTANCE_NUM || '1';
   const targetUrl = process.env.TARGET_URL || 'https://freightcore.ae';
   
-  // Create screenshots directory
   const screenshotsDir = path.join(__dirname, 'test-results', `instance-${instanceNum}`);
   if (!fs.existsSync(screenshotsDir)) {
     fs.mkdirSync(screenshotsDir, { recursive: true });
@@ -43,7 +42,7 @@ async function runTest() {
   console.log(`${'='.repeat(60)}\n`);
 
   const browser = await chromium.launch({
-    headless: false,  // GUI mode on virtual display
+    headless: false,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -62,7 +61,6 @@ async function runTest() {
 
     const page = await context.newPage();
     
-    // Log browser console messages
     page.on('console', msg => {
       const type = msg.type();
       if (type === 'error' || type === 'warning') {
@@ -74,9 +72,7 @@ async function runTest() {
       console.error(`❌ Page Error [${instanceNum}]:`, error.message);
     });
 
-    // ============================================
-    // STEP 1: Navigate to Website
-    // ============================================
+    // Navigate
     console.log(`⏳ Instance ${instanceNum}: Navigating to ${targetUrl}...`);
     const startTime = Date.now();
     
@@ -93,12 +89,10 @@ async function runTest() {
       path: path.join(screenshotsDir, `01-homepage.png`),
       fullPage: true 
     });
-    console.log(`📸 Screenshot 1/4 - Homepage captured`);
+    console.log(`📸 Screenshot 1/4 - Homepage`);
 
-    // ============================================
-    // STEP 2: Scroll to Contact Form
-    // ============================================
-    console.log(`⏳ Instance ${instanceNum}: Scrolling to contact section...`);
+    // Scroll to contact
+    console.log(`⏳ Instance ${instanceNum}: Scrolling to contact form...`);
     await page.evaluate(() => {
       const contactSection = document.querySelector('#contact');
       if (contactSection) {
@@ -111,77 +105,69 @@ async function runTest() {
       path: path.join(screenshotsDir, `02-contact-section.png`),
       fullPage: true 
     });
-    console.log(`📸 Screenshot 2/4 - Contact section visible`);
+    console.log(`📸 Screenshot 2/4 - Contact section`);
 
-    // ============================================
-    // STEP 3: Wait for Form Elements
-    // ============================================
-    console.log(`⏳ Instance ${instanceNum}: Waiting for form elements...`);
+    // Wait for form - use name field as marker
+    console.log(`⏳ Instance ${instanceNum}: Waiting for form...`);
     await page.waitForSelector('input[name="name"]', { 
       state: 'visible', 
       timeout: 15000 
     });
-    console.log(`✅ Instance ${instanceNum}: Form elements loaded`);
-    await page.waitForTimeout(1000);
+    
+    // Wait for intl-tel-input library to load
+    console.log(`⏳ Instance ${instanceNum}: Waiting for phone library...`);
+    await page.waitForFunction(() => {
+      return window.intlTelInput !== undefined;
+    }, { timeout: 10000 });
+    
+    await page.waitForTimeout(2000); // Extra wait for library initialization
+    console.log(`✅ Instance ${instanceNum}: Form ready`);
 
-    // ============================================
-    // STEP 4: Generate and Fill Demo Data
-    // ============================================
+    // Generate demo data
     const demoData = generateDemoData(instanceNum);
-    console.log(`\n📋 Instance ${instanceNum}: Generated Demo Data:`);
+    console.log(`\n📋 Instance ${instanceNum}: Demo Data:`);
     console.log(`   Name: ${demoData.name}`);
     console.log(`   Email: ${demoData.email}`);
     console.log(`   Phone: ${demoData.phone}`);
     console.log(`   Service: ${demoData.servicetype}\n`);
 
-    console.log(`⏳ Instance ${instanceNum}: Filling form fields...`);
+    console.log(`⏳ Instance ${instanceNum}: Filling form...`);
     
     // Fill name
-    await page.click('input[name="name"]');
-    await page.waitForTimeout(300);
     await page.fill('input[name="name"]', demoData.name);
-    console.log(`   ✓ Name field filled`);
-    await page.waitForTimeout(400);
-
-    // Fill email
-    await page.click('input[name="email"]');
-    await page.waitForTimeout(300);
-    await page.fill('input[name="email"]', demoData.email);
-    console.log(`   ✓ Email field filled`);
-    await page.waitForTimeout(400);
-
-    // Fill phone
-    await page.click('input[name="phoneraw"]');
-    await page.waitForTimeout(300);
-    await page.fill('input[name="phoneraw"]', demoData.phone);
-    console.log(`   ✓ Phone field filled`);
-    await page.waitForTimeout(400);
-
-    // Select service type
-    await page.click('select[name="servicetype"]');
-    await page.waitForTimeout(300);
-    await page.selectOption('select[name="servicetype"]', demoData.servicetype);
-    console.log(`   ✓ Service type selected: ${demoData.servicetype}`);
-    await page.waitForTimeout(400);
-
-    // Fill message
-    await page.click('textarea[name="message"]');
-    await page.waitForTimeout(300);
-    await page.fill('textarea[name="message"]', demoData.message);
-    console.log(`   ✓ Message field filled`);
+    console.log(`   ✓ Name filled`);
     await page.waitForTimeout(500);
 
-    // Take screenshot of filled form
+    // Fill email
+    await page.fill('input[name="email"]', demoData.email);
+    console.log(`   ✓ Email filled`);
+    await page.waitForTimeout(500);
+
+    // Fill phone - use ID selector and wait for visibility
+    console.log(`   ⏳ Filling phone field...`);
+    await page.waitForSelector('#phone', { state: 'visible', timeout: 10000 });
+    await page.fill('#phone', demoData.phone);
+    console.log(`   ✓ Phone filled`);
+    await page.waitForTimeout(500);
+
+    // Select service
+    await page.selectOption('select[name="servicetype"]', demoData.servicetype);
+    console.log(`   ✓ Service selected: ${demoData.servicetype}`);
+    await page.waitForTimeout(500);
+
+    // Fill message
+    await page.fill('textarea[name="message"]', demoData.message);
+    console.log(`   ✓ Message filled`);
+    await page.waitForTimeout(500);
+
     await page.screenshot({ 
       path: path.join(screenshotsDir, `03-form-filled.png`),
       fullPage: true 
     });
     console.log(`📸 Screenshot 3/4 - Form filled`);
 
-    // ============================================
-    // STEP 5: Submit Form
-    // ============================================
-    console.log(`\n⏳ Instance ${instanceNum}: Submitting form...`);
+    // Submit
+    console.log(`\n⏳ Instance ${instanceNum}: Submitting...`);
     
     try {
       const [response] = await Promise.all([
@@ -193,72 +179,58 @@ async function runTest() {
       ]);
 
       const status = response.status();
-      console.log(`✅ Instance ${instanceNum}: Form submitted! HTTP Status: ${status}`);
+      console.log(`✅ Instance ${instanceNum}: Submitted! Status: ${status}`);
       
-      // Try to get response body
       try {
         const responseBody = await response.text();
-        console.log(`📄 Instance ${instanceNum}: Server Response:`);
+        console.log(`📄 Server Response:`);
         console.log(responseBody.substring(0, 300));
         
-        // Try to parse JSON
         try {
           const jsonResponse = JSON.parse(responseBody);
-          console.log(`📊 Parsed Response:`, JSON.stringify(jsonResponse, null, 2));
+          console.log(`📊 Parsed:`, JSON.stringify(jsonResponse, null, 2));
           
           if (jsonResponse.success) {
-            console.log(`✅ Server confirmed: ${jsonResponse.message}`);
+            console.log(`✅ Success: ${jsonResponse.message}`);
+            console.log(`📧 Email should be sent to: ${demoData.email}`);
           } else {
-            console.log(`⚠️  Server error: ${jsonResponse.message}`);
+            console.log(`⚠️  Error: ${jsonResponse.message}`);
           }
-        } catch (e) {
-          // Not JSON or can't parse
-        }
+        } catch (e) {}
       } catch (e) {
-        console.log(`⚠️  Instance ${instanceNum}: Could not read response body`);
+        console.log(`⚠️  Could not read response`);
       }
 
     } catch (submitError) {
-      console.error(`❌ Instance ${instanceNum}: Form submission error:`, submitError.message);
+      console.error(`❌ Instance ${instanceNum}: Submit error:`, submitError.message);
     }
 
-    // ============================================
-    // STEP 6: Wait and Check Result
-    // ============================================
-    console.log(`⏳ Instance ${instanceNum}: Waiting for result...`);
     await page.waitForTimeout(3000);
     
-    // Check if success message appeared
     const successVisible = await page.isVisible('#contact-success-msg').catch(() => false);
-    console.log(`${successVisible ? '✅' : '⚠️'}  Instance ${instanceNum}: Success message visible: ${successVisible}`);
+    console.log(`${successVisible ? '✅' : '⚠️'}  Success message: ${successVisible}`);
 
-    // Take final screenshot
     await page.screenshot({ 
       path: path.join(screenshotsDir, `04-after-submit.png`),
       fullPage: true 
     });
-    console.log(`📸 Screenshot 4/4 - After submission`);
+    console.log(`📸 Screenshot 4/4 - After submit`);
 
-    // ============================================
-    // SUMMARY
-    // ============================================
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`✅ Instance ${instanceNum}: TEST COMPLETED SUCCESSFULLY`);
+    console.log(`✅ Instance ${instanceNum}: COMPLETED`);
     console.log(`${'='.repeat(60)}`);
     console.log(`📊 Summary:`);
-    console.log(`   - Page Load Time: ${(loadTime / 1000).toFixed(2)}s`);
-    console.log(`   - Form Submission: ${successVisible ? 'Success' : 'Check logs'}`);
-    console.log(`   - Screenshots: 4 saved`);
-    console.log(`   - Email sent to: ${demoData.email}`);
+    console.log(`   - Load Time: ${(loadTime / 1000).toFixed(2)}s`);
+    console.log(`   - Form Submitted: ${successVisible ? 'Yes' : 'Check logs'}`);
+    console.log(`   - Email Target: ${demoData.email}`);
     console.log(`${'='.repeat(60)}\n`);
 
   } catch (error) {
     console.error(`\n${'='.repeat(60)}`);
-    console.error(`❌ Instance ${instanceNum}: ERROR OCCURRED`);
+    console.error(`❌ Instance ${instanceNum}: ERROR`);
     console.error(`${'='.repeat(60)}`);
-    console.error(`Error Type: ${error.name}`);
-    console.error(`Error Message: ${error.message}`);
-    console.error(`Stack Trace:\n${error.stack}`);
+    console.error(`Error: ${error.message}`);
+    console.error(`Stack:\n${error.stack}`);
     console.error(`${'='.repeat(60)}\n`);
     
     try {
@@ -268,11 +240,8 @@ async function runTest() {
           path: path.join(screenshotsDir, `ERROR.png`),
           fullPage: true 
         });
-        console.log(`📸 Instance ${instanceNum}: Error screenshot saved`);
       }
-    } catch (screenshotError) {
-      console.error(`⚠️  Instance ${instanceNum}: Could not capture error screenshot`);
-    }
+    } catch (e) {}
     
     process.exit(1);
   } finally {
@@ -281,7 +250,6 @@ async function runTest() {
   }
 }
 
-// Run the test
 runTest().catch(error => {
   console.error('💥 Fatal error:', error);
   process.exit(1);
