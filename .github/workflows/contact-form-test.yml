@@ -1,4 +1,4 @@
-name: Contact Form Load Test - GUI Mode
+name: Contact Form Load Test
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       instances:
         description: 'Number of parallel tests (1-10)'
         required: true
-        default: '3'
+        default: '5'
         type: choice
         options:
           - '1'
@@ -22,124 +22,154 @@ jobs:
     strategy:
       matrix:
         instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        browser: ['chromium', 'chrome']
-      max-parallel: ${{ fromJSON(github.event.inputs.instances) }}
+      max-parallel: 10
       fail-fast: false
     
+    # Only run the selected number of instances
+    if: matrix.instance <= fromJSON(github.event.inputs.instances)
+    
     steps:
-      - name: Skip if not needed
-        if: matrix.instance > fromJSON(github.event.inputs.instances)
-        run: |
-          echo "Skipping instance ${{ matrix.instance }}"
-          exit 0
-
       - name: Checkout code
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install System Dependencies
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            xvfb \
-            x11-utils \
-            libxkbcommon-x11-0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-xinerama0 \
-            libxcb-xfixes0 \
-            libasound2 \
-            ffmpeg \
-            fluxbox
-
-      - name: Install Google Chrome
-        if: matrix.instance <= fromJSON(github.event.inputs.instances) && matrix.browser == 'chrome'
-        run: |
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
-          google-chrome --version
-
       - name: Install Dependencies
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         run: npm install
 
-      - name: Install Playwright Browsers
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
-        run: |
-          npx playwright install chromium
-          npx playwright install-deps chromium
+      - name: Install Playwright Browsers with System Dependencies
+        run: npx playwright install --with-deps chromium
 
-      - name: Start Virtual Display
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
+      - name: Setup Virtual Display (Xvfb)
         run: |
-          Xvfb :99 -screen 0 1920x1080x24 &
-          export DISPLAY=:99
-          fluxbox &
-          sleep 3
-          xdpyinfo -display :99 >/dev/null 2>&1 && echo "✅ Display running" || echo "❌ Display failed"
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          # Start Xvfb on display :99
+          Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
           echo "DISPLAY=:99" >> $GITHUB_ENV
-
-      - name: Start Screen Recording
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
-        run: |
-          mkdir -p recordings
-          ffmpeg -f x11grab -video_size 1920x1080 -i :99 -codec:v libx264 -r 30 \
-            recordings/${{ matrix.browser }}-instance-${{ matrix.instance }}.mp4 &
-          echo $! > ffmpeg.pid
           sleep 2
 
+      - name: Create Screenshots Folder
+        run: mkdir -p test-results/instance-${{ matrix.instance }}
+
       - name: Run Form Submission Test
-        if: matrix.instance <= fromJSON(github.event.inputs.instances)
         run: node test-form.js
         env:
           INSTANCE_NUM: ${{ matrix.instance }}
-          BROWSER_TYPE: ${{ matrix.browser }}
           TARGET_URL: https://freightcore.ae
           DISPLAY: :99
-          HEADLESS: 'false'
         continue-on-error: true
 
-      - name: Stop Screen Recording
-        if: matrix.instance <= fromJSON(github.event.inputs.instances) && always()
+      - name: List Generated Screenshots
         run: |
-          if [ -f ffmpeg.pid ]; then
-            kill $(cat ffmpeg.pid) || true
-            sleep 2
-          fi
+          echo "Screenshots generated:"
+          ls -lah test-results/instance-${{ matrix.instance }}/
 
-      - name: Upload Screenshots
-        if: matrix.instance <= fromJSON(github.event.inputs.instances) && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshots-${{ matrix.browser }}-${{ matrix.instance }}
-          path: screenshots/
-          retention-days: 7
-
-      - name: Upload Video Recording
-        if: matrix.instance <= fromJSON(github.event.inputs.instances) && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: video-${{ matrix.browser }}-${{ matrix.instance }}
-          path: recordings/
-          retention-days: 7
-
-  summary:
+  commit-results:
     needs: form-test
     runs-on: ubuntu-latest
     if: always()
+    
     steps:
-      - name: Test Summary
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results/
+        continue-on-error: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Setup Virtual Display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+          sleep 2
+
+      - name: Re-run Tests to Generate Screenshots
+        run: |
+          for i in $(seq 1 ${{ github.event.inputs.instances }}); do
+            echo "Running instance $i..."
+            mkdir -p test-results/instance-$i
+            INSTANCE_NUM=$i TARGET_URL=https://freightcore.ae DISPLAY=:99 node test-form.js || true
+          done
+
+      - name: Create Test Summary
+        run: |
+          echo "# 📊 Load Test Results" > test-results/SUMMARY.md
+          echo "" >> test-results/SUMMARY.md
+          echo "**Date:** $(date)" >> test-results/SUMMARY.md
+          echo "**Instances Run:** ${{ github.event.inputs.instances }}" >> test-results/SUMMARY.md
+          echo "**Target URL:** https://freightcore.ae" >> test-results/SUMMARY.md
+          echo "" >> test-results/SUMMARY.md
+          echo "## Screenshots by Instance" >> test-results/SUMMARY.md
+          echo "" >> test-results/SUMMARY.md
+          
+          for i in $(seq 1 ${{ github.event.inputs.instances }}); do
+            echo "### Instance $i" >> test-results/SUMMARY.md
+            if [ -d "test-results/instance-$i" ]; then
+              ls test-results/instance-$i/*.png 2>/dev/null | while read file; do
+                filename=$(basename "$file")
+                echo "- ![Screenshot](./$filename)" >> test-results/SUMMARY.md
+              done
+            fi
+            echo "" >> test-results/SUMMARY.md
+          done
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Commit Screenshots to Repository
+        run: |
+          # Create timestamped folder
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          RESULTS_DIR="test-results/run-${TIMESTAMP}"
+          mkdir -p "$RESULTS_DIR"
+          
+          # Copy all screenshots to timestamped folder
+          cp -r test-results/instance-* "$RESULTS_DIR/" 2>/dev/null || true
+          cp test-results/SUMMARY.md "$RESULTS_DIR/" 2>/dev/null || true
+          
+          # Add to git
+          git add test-results/
+          
+          # Check if there are changes
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "🤖 Add test results from run ${TIMESTAMP} (${{ github.event.inputs.instances }} instances)"
+            git push
+            echo "✅ Screenshots committed and pushed to repository"
+          fi
+
+      - name: Generate Summary
         run: |
           echo "### Load Test Completed ✅" >> $GITHUB_STEP_SUMMARY
-          echo "**Browsers:** Chromium & Google Chrome" >> $GITHUB_STEP_SUMMARY
-          echo "**Instances:** ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Instances run:** ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target URL:** https://freightcore.ae" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Screenshots have been committed to the repository under \`test-results/\` folder." >> $GITHUB_STEP_SUMMARY

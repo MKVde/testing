@@ -1,12 +1,10 @@
 {
-  "name": "freightcore-gui-load-test",
+  "name": "freightcore-load-test",
   "version": "1.0.0",
-  "description": "GUI Contact form load testing with Chrome & Brave",
+  "description": "Contact form load testing for FreightCore with GUI Chrome",
   "main": "test-form.js",
   "scripts": {
-    "test": "node test-form.js",
-    "test:chrome": "BROWSER_TYPE=chromium node test-form.js",
-    "test:brave": "BROWSER_TYPE=brave node test-form.js"
+    "test": "node test-form.js"
   },
   "dependencies": {
     "playwright": "^1.41.0"

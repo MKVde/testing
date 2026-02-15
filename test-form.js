@@ -1,134 +1,104 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
-
-// Ensure directories exist
-const screenshotsDir = path.join(__dirname, 'screenshots');
-const recordingsDir = path.join(__dirname, 'recordings');
-
-if (!fs.existsSync(screenshotsDir)) {
-  fs.mkdirSync(screenshotsDir, { recursive: true });
-}
-if (!fs.existsSync(recordingsDir)) {
-  fs.mkdirSync(recordingsDir, { recursive: true });
-}
 
 // Demo data generator
-function generateDemoData(instanceNum, browserType) {
+function generateDemoData(instanceNum) {
   const timestamp = Date.now();
   const services = ['airfreight', 'seafreight', 'landtransport', 'customsclearance'];
   const randomService = services[Math.floor(Math.random() * services.length)];
   
   return {
-    name: `Test User ${instanceNum} (${browserType})`,
-    email: `test.${browserType}.${instanceNum}.${timestamp}@gmail.com`,
-    phone: `+971${Math.floor(Math.random() * 900000000 + 100000000)}`,
+    name: `Test User ${instanceNum}`,
+    email: `test${instanceNum}.${timestamp}@example.com`,
+    phone: `+971501234${String(instanceNum).padStart(3, '0')}`,
     service_type: randomService,
-    message: `Automated GUI test from ${browserType.toUpperCase()} browser\nInstance: ${instanceNum}\nTimestamp: ${new Date().toISOString()}\nService: ${randomService}`
+    message: `🤖 Automated Load Test\n\n` +
+             `Instance: ${instanceNum}\n` +
+             `Timestamp: ${new Date().toISOString()}\n` +
+             `Service: ${randomService}\n` +
+             `Browser: Chromium with GUI on Xvfb\n` +
+             `\nThis is a test submission from GitHub Actions.`
   };
-}
-
-async function getBrowserExecutable(browserType) {
-  if (browserType === 'brave') {
-    // Check common Brave installation paths
-    const paths = [
-      '/usr/bin/brave-browser',
-      '/usr/bin/brave',
-      '/snap/bin/brave'
-    ];
-    
-    for (const path of paths) {
-      if (fs.existsSync(path)) {
-        return path;
-      }
-    }
-    throw new Error('Brave browser not found');
-  }
-  return null; // Use Playwright's bundled Chromium
 }
 
 async function runTest() {
   const instanceNum = process.env.INSTANCE_NUM || '1';
-  const browserType = process.env.BROWSER_TYPE || 'chromium';
   const targetUrl = process.env.TARGET_URL || 'https://freightcore.ae';
-  const headless = process.env.HEADLESS === 'true';
   
+  // Create screenshots directory for this instance
+  const screenshotsDir = path.join(__dirname, 'test-results', `instance-${instanceNum}`);
+  if (!fs.existsSync(screenshotsDir)) {
+    fs.mkdirSync(screenshotsDir, { recursive: true });
+  }
+
   console.log(`\n${'='.repeat(60)}`);
-  console.log(`🚀 Instance ${instanceNum}: Starting GUI test`);
-  console.log(`🌐 Browser: ${browserType.toUpperCase()}`);
-  console.log(`🎯 Target: ${targetUrl}`);
+  console.log(`🚀 Instance ${instanceNum}: Starting Load Test`);
+  console.log(`${'='.repeat(60)}`);
+  console.log(`📍 Target: ${targetUrl}`);
+  console.log(`💾 Screenshots: ${screenshotsDir}`);
+  console.log(`🖥️  Display: ${process.env.DISPLAY || 'default'}`);
   console.log(`${'='.repeat(60)}\n`);
 
-  let browser;
-  let playwright;
-  
+  // Launch browser with GUI (runs on Xvfb virtual display)
+  const browser = await chromium.launch({
+    headless: false,  // GUI mode (on virtual display)
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--window-size=1920,1080'
+    ]
+  });
+
   try {
-    // Import the correct browser
-    if (browserType === 'firefox') {
-      const { firefox } = require('playwright');
-      playwright = firefox;
-      console.log(`📦 Using Firefox browser`);
-    } else {
-      const { chromium } = require('playwright');
-      playwright = chromium;
-      console.log(`📦 Using Chromium-based browser`);
-    }
-
-    const launchOptions = {
-      headless: headless,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--window-size=1920,1080'
-      ]
-    };
-
-    // Configure browser-specific options
-    if (browserType === 'chrome' || browserType === 'brave') {
-      const executablePath = await getBrowserExecutable(browserType);
-      launchOptions.executablePath = executablePath;
-      console.log(`✅ Using ${browserType} at: ${executablePath}`);
-    }
-
-    browser = await playwright.launch(launchOptions);
-    console.log(`✅ ${browserType.toUpperCase()} browser launched in GUI mode`);
-
     const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      recordVideo: {
-        dir: recordingsDir,
-        size: { width: 1920, height: 1080 }
-      }
+      locale: 'en-US'
     });
 
     const page = await context.newPage();
     
-    // Enable console logging
+    // Enable console logging from browser
     page.on('console', msg => {
       const type = msg.type();
-      const text = msg.text();
-      console.log(`📋 Browser Console [${type}]: ${text}`);
+      if (type === 'error' || type === 'warning') {
+        console.log(`🌐 Browser [${instanceNum}] ${type.toUpperCase()}:`, msg.text());
+      }
     });
     
-    // Step 1: Navigate to website
-    console.log(`\n🌐 Step 1: Navigating to ${targetUrl}...`);
+    // Log page errors
+    page.on('pageerror', error => {
+      console.error(`❌ Page Error [${instanceNum}]:`, error.message);
+    });
+
+    // ============================================
+    // STEP 1: Navigate to Website
+    // ============================================
+    console.log(`⏳ Instance ${instanceNum}: Navigating to ${targetUrl}...`);
+    const startTime = Date.now();
+    
     await page.goto(targetUrl, {
       waitUntil: 'networkidle',
       timeout: 60000
     });
     
-    await page.waitForTimeout(3000); // Let page fully render
+    const loadTime = Date.now() - startTime;
+    console.log(`✅ Instance ${instanceNum}: Page loaded in ${(loadTime / 1000).toFixed(2)}s`);
+    
+    await page.waitForTimeout(2000);
     await page.screenshot({ 
-      path: path.join(screenshotsDir, `${browserType}-${instanceNum}-01-homepage.png`), 
+      path: path.join(screenshotsDir, `01-homepage.png`),
       fullPage: true 
     });
-    console.log(`✅ Page loaded successfully`);
+    console.log(`📸 Instance ${instanceNum}: Screenshot 1/4 - Homepage captured`);
 
-    // Step 2: Scroll to contact form with smooth animation
-    console.log(`\n📜 Step 2: Scrolling to contact form...`);
+    // ============================================
+    // STEP 2: Scroll to Contact Form
+    // ============================================
+    console.log(`⏳ Instance ${instanceNum}: Scrolling to contact section...`);
     await page.evaluate(() => {
       const contactSection = document.querySelector('#contact');
       if (contactSection) {
@@ -136,137 +106,164 @@ async function runTest() {
       }
     });
     await page.waitForTimeout(2000);
-
-    // Step 3: Wait for form to be visible
-    console.log(`\n⏳ Step 3: Waiting for form elements...`);
-    await page.waitForSelector('input[name="name"]', { state: 'visible', timeout: 10000 });
-    console.log(`✅ Form is visible`);
-
-    // Generate demo data
-    const demoData = generateDemoData(instanceNum, browserType);
-    console.log(`\n📝 Generated test data:`);
-    console.log(JSON.stringify(demoData, null, 2));
-
-    // Step 4: Fill form fields with realistic delays
-    console.log(`\n✍️  Step 4: Filling form fields...`);
     
-    // Name field with typing animation
+    await page.screenshot({ 
+      path: path.join(screenshotsDir, `02-contact-section.png`),
+      fullPage: true 
+    });
+    console.log(`📸 Instance ${instanceNum}: Screenshot 2/4 - Contact section visible`);
+
+    // ============================================
+    // STEP 3: Wait for Form Elements
+    // ============================================
+    console.log(`⏳ Instance ${instanceNum}: Waiting for form elements...`);
+    await page.waitForSelector('input[name="name"]', { 
+      state: 'visible', 
+      timeout: 15000 
+    });
+    console.log(`✅ Instance ${instanceNum}: Form elements loaded`);
+    await page.waitForTimeout(1000);
+
+    // ============================================
+    // STEP 4: Generate and Fill Demo Data
+    // ============================================
+    const demoData = generateDemoData(instanceNum);
+    console.log(`\n📋 Instance ${instanceNum}: Generated Demo Data:`);
+    console.log(`   Name: ${demoData.name}`);
+    console.log(`   Email: ${demoData.email}`);
+    console.log(`   Phone: ${demoData.phone}`);
+    console.log(`   Service: ${demoData.service_type}`);
+    console.log(`   Message: ${demoData.message.substring(0, 50)}...\n`);
+
+    console.log(`⏳ Instance ${instanceNum}: Filling form fields...`);
+    
+    // Fill name
     await page.click('input[name="name"]');
-    await page.waitForTimeout(500);
-    await page.type('input[name="name"]', demoData.name, { delay: 80 });
-    console.log(`✅ Name field filled`);
+    await page.waitForTimeout(300);
+    await page.fill('input[name="name"]', demoData.name);
+    console.log(`   ✓ Name field filled`);
     await page.waitForTimeout(400);
 
-    // Email field
+    // Fill email
     await page.click('input[name="email"]');
-    await page.waitForTimeout(500);
-    await page.type('input[name="email"]', demoData.email, { delay: 60 });
-    console.log(`✅ Email field filled`);
+    await page.waitForTimeout(300);
+    await page.fill('input[name="email"]', demoData.email);
+    console.log(`   ✓ Email field filled`);
     await page.waitForTimeout(400);
 
-    // Phone field
+    // Fill phone (using phoneraw field from your HTML)
     await page.click('input[name="phoneraw"]');
-    await page.waitForTimeout(500);
-    await page.type('input[name="phoneraw"]', demoData.phone, { delay: 70 });
-    console.log(`✅ Phone field filled`);
+    await page.waitForTimeout(300);
+    await page.fill('input[name="phoneraw"]', demoData.phone);
+    console.log(`   ✓ Phone field filled`);
     await page.waitForTimeout(400);
 
-    // Service type dropdown with hover
-    await page.hover('select[name="servicetype"]');
+    // Select service type
+    await page.click('select[name="servicetype"]');
     await page.waitForTimeout(300);
     await page.selectOption('select[name="servicetype"]', demoData.service_type);
-    console.log(`✅ Service type selected: ${demoData.service_type}`);
-    await page.waitForTimeout(500);
+    console.log(`   ✓ Service type selected: ${demoData.service_type}`);
+    await page.waitForTimeout(400);
 
-    // Message textarea
+    // Fill message
     await page.click('textarea[name="message"]');
+    await page.waitForTimeout(300);
+    await page.fill('textarea[name="message"]', demoData.message);
+    console.log(`   ✓ Message field filled`);
     await page.waitForTimeout(500);
-    await page.type('textarea[name="message"]', demoData.message, { delay: 50 });
-    console.log(`✅ Message field filled`);
-    await page.waitForTimeout(1000);
 
     // Take screenshot of filled form
     await page.screenshot({ 
-      path: path.join(screenshotsDir, `${browserType}-${instanceNum}-02-form-filled.png`), 
+      path: path.join(screenshotsDir, `03-form-filled.png`),
       fullPage: true 
     });
-    console.log(`📸 Screenshot captured: form filled`);
+    console.log(`📸 Instance ${instanceNum}: Screenshot 3/4 - Form filled`);
 
-    // Step 5: Hover over submit button then click
-    console.log(`\n🖱️  Step 5: Submitting form...`);
-    const submitButton = 'form#contact-form button[type="submit"]';
-    await page.hover(submitButton);
-    await page.waitForTimeout(800);
+    // ============================================
+    // STEP 5: Submit Form
+    // ============================================
+    console.log(`\n⏳ Instance ${instanceNum}: Submitting form...`);
     
-    const [response] = await Promise.all([
-      page.waitForResponse(response => 
-        response.url().includes('process_contact.php'),
-        { timeout: 30000 }
-      ).catch(() => null),
-      page.click(submitButton)
-    ]);
+    try {
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          response => response.url().includes('process_contact.php'),
+          { timeout: 30000 }
+        ),
+        page.click('form#contact-form button[type="submit"]')
+      ]);
 
-    if (response) {
-      console.log(`✅ Form submitted, HTTP status: ${response.status()}`);
-      const responseBody = await response.text().catch(() => 'Unable to read response');
-      console.log(`📥 Response: ${responseBody}`);
-    } else {
-      console.log(`⚠️  No response captured (might be AJAX)`);
+      const status = response.status();
+      console.log(`✅ Instance ${instanceNum}: Form submitted! HTTP Status: ${status}`);
+      
+      // Try to get response body
+      try {
+        const responseBody = await response.text();
+        console.log(`📄 Instance ${instanceNum}: Server Response:`);
+        console.log(responseBody.substring(0, 200));
+      } catch (e) {
+        console.log(`⚠️  Instance ${instanceNum}: Could not read response body`);
+      }
+
+    } catch (submitError) {
+      console.error(`❌ Instance ${instanceNum}: Form submission error:`, submitError.message);
     }
+
+    // ============================================
+    // STEP 6: Wait and Check Result
+    // ============================================
+    console.log(`⏳ Instance ${instanceNum}: Waiting for result...`);
+    await page.waitForTimeout(3000);
     
-    // Wait for success message
-    await page.waitForTimeout(4000);
-    
+    // Check if success message appeared
     const successVisible = await page.isVisible('#contact-success-msg').catch(() => false);
-    console.log(`${successVisible ? '✅' : '❌'} Success message visible: ${successVisible}`);
+    console.log(`${successVisible ? '✅' : '⚠️'}  Instance ${instanceNum}: Success message visible: ${successVisible}`);
 
     // Take final screenshot
     await page.screenshot({ 
-      path: path.join(screenshotsDir, `${browserType}-${instanceNum}-03-after-submit.png`), 
+      path: path.join(screenshotsDir, `04-after-submit.png`),
       fullPage: true 
     });
-    console.log(`📸 Final screenshot captured`);
+    console.log(`📸 Instance ${instanceNum}: Screenshot 4/4 - After submission`);
 
-    // Keep browser open for a moment to ensure recording captures everything
-    await page.waitForTimeout(3000);
-
+    // ============================================
+    // SUMMARY
+    // ============================================
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`✅ Instance ${instanceNum} (${browserType.toUpperCase()}): TEST COMPLETED SUCCESSFULLY`);
+    console.log(`✅ Instance ${instanceNum}: TEST COMPLETED SUCCESSFULLY`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`📊 Summary:`);
+    console.log(`   - Page Load Time: ${(loadTime / 1000).toFixed(2)}s`);
+    console.log(`   - Form Submission: ${successVisible ? 'Success' : 'Unknown'}`);
+    console.log(`   - Screenshots: 4 saved to ${screenshotsDir}`);
     console.log(`${'='.repeat(60)}\n`);
-
-    await context.close();
-    await browser.close();
 
   } catch (error) {
     console.error(`\n${'='.repeat(60)}`);
-    console.error(`❌ Instance ${instanceNum} (${browserType.toUpperCase()}): ERROR OCCURRED`);
-    console.error(`Error: ${error.message}`);
-    console.error(`Stack: ${error.stack}`);
+    console.error(`❌ Instance ${instanceNum}: ERROR OCCURRED`);
+    console.error(`${'='.repeat(60)}`);
+    console.error(`Error Type: ${error.name}`);
+    console.error(`Error Message: ${error.message}`);
+    console.error(`Stack Trace:\n${error.stack}`);
     console.error(`${'='.repeat(60)}\n`);
     
     try {
-      if (browser) {
-        const contexts = browser.contexts();
-        if (contexts.length > 0) {
-          const pages = contexts[0].pages();
-          if (pages.length > 0) {
-            await pages[0].screenshot({ 
-              path: path.join(screenshotsDir, `${browserType}-${instanceNum}-ERROR.png`), 
-              fullPage: true 
-            });
-            console.log(`📸 Error screenshot saved`);
-          }
-        }
+      const page = await browser.contexts()[0]?.pages()[0];
+      if (page) {
+        await page.screenshot({ 
+          path: path.join(screenshotsDir, `ERROR.png`),
+          fullPage: true 
+        });
+        console.log(`📸 Instance ${instanceNum}: Error screenshot saved`);
       }
     } catch (screenshotError) {
-      console.error(`Could not capture error screenshot: ${screenshotError.message}`);
-    }
-    
-    if (browser) {
-      await browser.close();
+      console.error(`⚠️  Instance ${instanceNum}: Could not capture error screenshot`);
     }
     
     process.exit(1);
+  } finally {
+    await browser.close();
+    console.log(`🔒 Instance ${instanceNum}: Browser closed\n`);
   }
 }
 
