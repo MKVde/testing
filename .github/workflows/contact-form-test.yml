@@ -25,27 +25,40 @@ jobs:
       max-parallel: 10
       fail-fast: false
     
-    # Only run the selected number of instances
-    if: matrix.instance <= fromJSON(github.event.inputs.instances)
-    
     steps:
+      # Check if this instance should run
+      - name: Check if should run
+        id: check
+        run: |
+          if [ ${{ matrix.instance }} -le ${{ github.event.inputs.instances }} ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "Skipping instance ${{ matrix.instance }}"
+          fi
+
       - name: Checkout code
+        if: steps.check.outputs.should_run == 'true'
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
+        if: steps.check.outputs.should_run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install Dependencies
+        if: steps.check.outputs.should_run == 'true'
         run: npm install
 
       - name: Install Playwright Browsers with System Dependencies
+        if: steps.check.outputs.should_run == 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Setup Virtual Display (Xvfb)
+        if: steps.check.outputs.should_run == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
@@ -55,9 +68,11 @@ jobs:
           sleep 2
 
       - name: Create Screenshots Folder
+        if: steps.check.outputs.should_run == 'true'
         run: mkdir -p test-results/instance-${{ matrix.instance }}
 
       - name: Run Form Submission Test
+        if: steps.check.outputs.should_run == 'true'
         run: node test-form.js
         env:
           INSTANCE_NUM: ${{ matrix.instance }}
@@ -66,9 +81,18 @@ jobs:
         continue-on-error: true
 
       - name: List Generated Screenshots
+        if: steps.check.outputs.should_run == 'true'
         run: |
           echo "Screenshots generated:"
           ls -lah test-results/instance-${{ matrix.instance }}/
+
+      - name: Upload Screenshots as Artifact
+        if: steps.check.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-instance-${{ matrix.instance }}
+          path: test-results/instance-${{ matrix.instance }}/
+          retention-days: 7
 
   commit-results:
     needs: form-test
@@ -85,91 +109,106 @@ jobs:
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
-          path: test-results/
-        continue-on-error: true
+          path: downloaded-artifacts/
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Setup Virtual Display
+      - name: Organize Screenshots
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
-          Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
-          echo "DISPLAY=:99" >> $GITHUB_ENV
-          sleep 2
-
-      - name: Re-run Tests to Generate Screenshots
-        run: |
-          for i in $(seq 1 ${{ github.event.inputs.instances }}); do
-            echo "Running instance $i..."
-            mkdir -p test-results/instance-$i
-            INSTANCE_NUM=$i TARGET_URL=https://freightcore.ae DISPLAY=:99 node test-form.js || true
-          done
+          # Create timestamped results folder
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          RESULTS_DIR="test-results/run-${TIMESTAMP}"
+          mkdir -p "$RESULTS_DIR"
+          
+          # Copy all downloaded artifacts to results folder
+          if [ -d "downloaded-artifacts" ]; then
+            for artifact_dir in downloaded-artifacts/screenshots-instance-*; do
+              if [ -d "$artifact_dir" ]; then
+                instance_name=$(basename "$artifact_dir")
+                instance_num=$(echo "$instance_name" | grep -oP '\d+')
+                target_dir="$RESULTS_DIR/instance-${instance_num}"
+                mkdir -p "$target_dir"
+                cp -r "$artifact_dir"/* "$target_dir/" 2>/dev/null || true
+                echo "✓ Copied screenshots from $instance_name"
+              fi
+            done
+          fi
+          
+          echo "RESULTS_DIR=$RESULTS_DIR" >> $GITHUB_ENV
+          echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
 
       - name: Create Test Summary
         run: |
-          echo "# 📊 Load Test Results" > test-results/SUMMARY.md
-          echo "" >> test-results/SUMMARY.md
-          echo "**Date:** $(date)" >> test-results/SUMMARY.md
-          echo "**Instances Run:** ${{ github.event.inputs.instances }}" >> test-results/SUMMARY.md
-          echo "**Target URL:** https://freightcore.ae" >> test-results/SUMMARY.md
-          echo "" >> test-results/SUMMARY.md
-          echo "## Screenshots by Instance" >> test-results/SUMMARY.md
-          echo "" >> test-results/SUMMARY.md
+          RESULTS_DIR="${{ env.RESULTS_DIR }}"
           
+          cat > "$RESULTS_DIR/SUMMARY.md" << 'EOF'
+          # 📊 Load Test Results
+          
+          **Date:** $(date)
+          **Instances Run:** ${{ github.event.inputs.instances }}
+          **Target URL:** https://freightcore.ae
+          **Run ID:** ${{ github.run_id }}
+          
+          ---
+          
+          ## 📸 Screenshots by Instance
+          
+          EOF
+          
+          # Add screenshots for each instance
           for i in $(seq 1 ${{ github.event.inputs.instances }}); do
-            echo "### Instance $i" >> test-results/SUMMARY.md
-            if [ -d "test-results/instance-$i" ]; then
-              ls test-results/instance-$i/*.png 2>/dev/null | while read file; do
-                filename=$(basename "$file")
-                echo "- ![Screenshot](./$filename)" >> test-results/SUMMARY.md
+            echo "### Instance $i" >> "$RESULTS_DIR/SUMMARY.md"
+            echo "" >> "$RESULTS_DIR/SUMMARY.md"
+            
+            if [ -d "$RESULTS_DIR/instance-$i" ]; then
+              for screenshot in "$RESULTS_DIR/instance-$i"/*.png; do
+                if [ -f "$screenshot" ]; then
+                  filename=$(basename "$screenshot")
+                  echo "![Screenshot](./instance-$i/$filename)" >> "$RESULTS_DIR/SUMMARY.md"
+                  echo "" >> "$RESULTS_DIR/SUMMARY.md"
+                fi
               done
+            else
+              echo "*No screenshots found for this instance*" >> "$RESULTS_DIR/SUMMARY.md"
             fi
-            echo "" >> test-results/SUMMARY.md
+            
+            echo "" >> "$RESULTS_DIR/SUMMARY.md"
           done
+          
+          echo "✅ Summary created"
 
       - name: Configure Git
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-      - name: Commit Screenshots to Repository
+      - name: Commit and Push Screenshots
         run: |
-          # Create timestamped folder
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          RESULTS_DIR="test-results/run-${TIMESTAMP}"
-          mkdir -p "$RESULTS_DIR"
-          
-          # Copy all screenshots to timestamped folder
-          cp -r test-results/instance-* "$RESULTS_DIR/" 2>/dev/null || true
-          cp test-results/SUMMARY.md "$RESULTS_DIR/" 2>/dev/null || true
-          
-          # Add to git
+          # Add all test results
           git add test-results/
           
-          # Check if there are changes
+          # Check if there are changes to commit
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "⚠️ No changes to commit"
           else
-            git commit -m "🤖 Add test results from run ${TIMESTAMP} (${{ github.event.inputs.instances }} instances)"
+            git commit -m "🤖 Add load test results - Run ${{ env.TIMESTAMP }} (${{ github.event.inputs.instances }} instances)"
             git push
             echo "✅ Screenshots committed and pushed to repository"
+            echo "📁 Results saved to: test-results/run-${{ env.TIMESTAMP }}"
           fi
 
-      - name: Generate Summary
+      - name: Generate Workflow Summary
         run: |
-          echo "### Load Test Completed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎉 Load Test Completed Successfully" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Instances run:** ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Target URL:** https://freightcore.ae" >> $GITHUB_STEP_SUMMARY
+          echo "**📊 Test Details:**" >> $GITHUB_STEP_SUMMARY
+          echo "- **Instances Run:** ${{ github.event.inputs.instances }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target URL:** https://freightcore.ae" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp:** ${{ env.TIMESTAMP }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Screenshots have been committed to the repository under \`test-results/\` folder." >> $GITHUB_STEP_SUMMARY
+          echo "**📁 Results Location:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "test-results/run-${{ env.TIMESTAMP }}/" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Screenshots have been committed to the repository." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 [View Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
